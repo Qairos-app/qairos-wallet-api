@@ -1,0 +1,445 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+paths:
+  /wallet/nonce:
+    post:
+      operationId: walletNonce
+      summary: Issue a one-use, domain-bound Ethereum Mainnet sign-in challenge
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletAddressInput"
+      responses:
+        "200":
+          description: Ten-minute SIWE message; challenge token is an HttpOnly cookie
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletChallenge"
+        "403":
+          description: Same-origin browser request required
+        "429":
+          description: Rate limit reached
+        "503":
+          description: Sign-in unavailable
+  /wallet/verify:
+    post:
+      operationId: verifyWallet
+      summary: Verify the issued challenge and rotate it into a 24-hour wallet session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WalletSignatureInput"
+      responses:
+        "200":
+          description: Verified EOA or ERC-1271 wallet; session token stays HttpOnly
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletLogin"
+        "401":
+          description: Invalid, expired or replayed signature
+        "503":
+          description: Verification unavailable; no login completed
+  /wallet/session:
+    get:
+      operationId: getWalletSession
+      summary: Read the authenticated wallet without requesting another signature
+      responses:
+        "200":
+          description: Current wallet or signed-out state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletSession"
+        "503":
+          description: Session lookup unavailable
+    delete:
+      operationId: deleteWalletSession
+      summary: Revoke this wallet session and clear authentication cookies
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Signed out; server session revoked
+        "403":
+          description: Same-origin request and session CSRF token required
+        "503":
+          description: Logout not completed
+  /mainnet/status:
+    get:
+      operationId: getMainnetStatus
+      summary: Read the deployed Qairos contracts at one Mainnet block
+      responses:
+        "200":
+          description: Live read-only on-chain snapshot, cached for up to 30 seconds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MainnetStatus"
+        "503":
+          description: Mainnet data unavailable; no synthetic safe status is returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+  /ledger:
+    get:
+      operationId: getSharedLedger
+      summary: Shared paper pools, public commitments and this anonymous browser's positions
+      responses:
+        "200":
+          description: Snapshot and session-bound CSRF token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LedgerSnapshot"
+        "503":
+          description: Shared storage unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    delete:
+      operationId: deleteSharedData
+      summary: Delete this anonymous browser's paper positions and public commitment
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Shared data deleted and browser session cleared
+        "403":
+          $ref: "#/components/responses/LedgerForbidden"
+        "429":
+          $ref: "#/components/responses/LedgerRateLimited"
+        "503":
+          $ref: "#/components/responses/LedgerUnavailable"
+  /ledger/bets:
+    put:
+      operationId: savePaperPositions
+      summary: Replace this browser's paper positions, not real ETH trades
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaperPositions"
+      responses:
+        "200":
+          description: Persisted positions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaperPositions"
+        "400":
+          $ref: "#/components/responses/LedgerInvalid"
+        "403":
+          $ref: "#/components/responses/LedgerForbidden"
+        "429":
+          $ref: "#/components/responses/LedgerRateLimited"
+        "503":
+          $ref: "#/components/responses/LedgerUnavailable"
+  /ledger/ark:
+    put:
+      operationId: publishArkCommitment
+      summary: Publish an explicitly consented public commitment, without recovery secrets
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishCommitment"
+      responses:
+        "200":
+          description: Persisted public commitment; wallet ownership is not verified
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicCommitment"
+        "400":
+          $ref: "#/components/responses/LedgerInvalid"
+        "403":
+          $ref: "#/components/responses/LedgerForbidden"
+        "429":
+          $ref: "#/components/responses/LedgerRateLimited"
+        "503":
+          $ref: "#/components/responses/LedgerUnavailable"
+    delete:
+      operationId: removeArkCommitment
+      summary: Remove this browser's public commitment
+      parameters:
+        - $ref: "#/components/parameters/CsrfToken"
+      responses:
+        "204":
+          description: Removed
+        "403":
+          $ref: "#/components/responses/LedgerForbidden"
+        "429":
+          $ref: "#/components/responses/LedgerRateLimited"
+        "503":
+          $ref: "#/components/responses/LedgerUnavailable"
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+  /qrng:
+    get:
+      operationId: getQrngBytes
+      tags: [health]
+      summary: Fetch quantum random bytes from the configured ANU provider
+      parameters:
+        - name: length
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 64
+            default: 64
+      responses:
+        "200":
+          description: Random bytes from the quantum random number provider
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QrngBytes"
+        "400":
+          description: Invalid byte count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "429":
+          description: Request limit reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "502":
+          description: Quantum random number provider is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+        "503":
+          description: Quantum random number provider is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+components:
+  parameters:
+    CsrfToken:
+      name: X-CSRF-Token
+      in: header
+      required: true
+      schema:
+        type: string
+  responses:
+    LedgerForbidden:
+      description: Invalid browser session or CSRF token
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    LedgerInvalid:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    LedgerRateLimited:
+      description: Shared storage write limit reached
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+    LedgerUnavailable:
+      description: Shared storage temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ApiError"
+  schemas:
+    WalletAddressInput:
+      type: object
+      required: [address]
+      properties:
+        address:
+          type: string
+          pattern: "^0x[0-9a-fA-F]{40}$"
+    WalletSignatureInput:
+      type: object
+      required: [signature]
+      properties:
+        signature:
+          type: string
+          pattern: "^0x([0-9a-fA-F]{2})+$"
+          maxLength: 4098
+    WalletChallenge:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+    WalletLogin:
+      type: object
+      required: [address, csrfToken, expiresAt]
+      properties:
+        address:
+          type: string
+        csrfToken:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    WalletSession:
+      type: object
+      required: [address, csrfToken, expiresAt]
+      properties:
+        address:
+          type: [string, "null"]
+        csrfToken:
+          type: [string, "null"]
+        expiresAt:
+          type: [string, "null"]
+          format: date-time
+    MainnetStatus:
+      type: object
+      required: [chainId, blockNumber, observedAtUtc, threatLevel, firstBreakTime, rungCount, marketCount, vaultBreakerTripped, insuranceFreeCapitalWei, contracts, rungs, markets]
+      properties:
+        chainId: { type: integer, enum: [1] }
+        blockNumber: { type: integer, minimum: 1 }
+        observedAtUtc: { type: string, format: date-time }
+        threatLevel: { type: integer, minimum: 0, maximum: 5 }
+        firstBreakTime: { type: integer, minimum: 0 }
+        rungCount: { type: integer, minimum: 0 }
+        marketCount: { type: integer, minimum: 0 }
+        vaultBreakerTripped: { type: boolean }
+        insuranceFreeCapitalWei: { type: string, pattern: '^[0-9]+$' }
+        contracts:
+          type: array
+          items:
+            type: object
+            required: [name, address, deployed]
+            properties:
+              name: { type: string }
+              address: { type: string, pattern: '^0x[0-9a-fA-F]{40}$' }
+              deployed: { type: boolean }
+        rungs:
+          type: array
+          items:
+            type: object
+            required: [id, bits, armed, broken, solver, brokenAt, bountyWei]
+            properties:
+              id: { type: integer }
+              bits: { type: integer }
+              armed: { type: boolean }
+              broken: { type: boolean }
+              solver: { type: string }
+              brokenAt: { type: integer }
+              bountyWei: { type: string, pattern: '^[0-9]+$' }
+        markets:
+          type: array
+          items:
+            type: object
+            required: [id, bits, deadline, settled, yesWon, yesPoolWei, noPoolWei]
+            properties:
+              id: { type: integer }
+              bits: { type: integer }
+              deadline: { type: integer }
+              settled: { type: boolean }
+              yesWon: { type: boolean }
+              yesPoolWei: { type: string, pattern: '^[0-9]+$' }
+              noPoolWei: { type: string, pattern: '^[0-9]+$' }
+    PaperPositions:
+      type: object
+      additionalProperties: false
+      required: [s]
+      properties:
+        s:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items: { type: number, minimum: 0, maximum: 1000000 }
+    PublishCommitment:
+      type: object
+      additionalProperties: false
+      required: [account, commitment, consent]
+      properties:
+        account: { type: string, pattern: '^0x[0-9a-fA-F]{40}$' }
+        commitment: { type: string, pattern: '^0x[0-9a-fA-F]{64}$' }
+        consent: { type: boolean, enum: [true] }
+    PublicCommitment:
+      type: object
+      required: [account, commitment, ts]
+      properties:
+        account: { type: string }
+        commitment: { type: string }
+        ts: { type: number }
+    LedgerSnapshot:
+      type: object
+      required: [csrfToken, pools, mine, entries, hasOwnEntry]
+      properties:
+        csrfToken: { type: string }
+        pools: { type: array, items: { type: array, items: { type: number } } }
+        mine: { type: array, items: { type: array, items: { type: number } } }
+        entries: { type: array, items: { $ref: "#/components/schemas/PublicCommitment" } }
+        hasOwnEntry: { type: boolean }
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+    QrngBytes:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 255
+        count:
+          type: integer
+      required: [data, count]
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
